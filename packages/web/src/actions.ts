@@ -60,7 +60,7 @@ async function setChecked(target: ActionTarget, checked: boolean, operation: Con
         retryable: false,
       });
     }
-    await clickControl({ kind: 'element', element }, { timeout: remaining() });
+    await clickControl({ kind: 'element', element }, verb, { timeout: remaining(), signal: operation.signal });
     const unchanged = (detail = ''): EngineError =>
       new EngineError('NOT_ACTIONABLE', `${verb} clicked the control but its checked state did not change${detail}`, {
         retryable: false,
@@ -89,23 +89,23 @@ async function setChecked(target: ActionTarget, checked: boolean, operation: Con
 }
 
 /**
- * The label a click on a native checkbox or radio goes through instead of
- * the control itself, at the control's point when it has one, else at the
- * label's centre.
+ * What the page throws while a checkbox or radio and every one of its labels
+ * are unrendered, so a click could reach none of them yet.
  */
-interface StandIn {
-  labelIndex: number;
-  position?: { x: number; y: number };
-}
+const UNRENDERED = 'the control and its labels are not visible';
 
 /**
  * Runs in the page. A component library (Element Plus) hides a native
  * checkbox or radio under its label's styled spans with `z-index: -1`, or
  * gives it no box at all, so Playwright refuses the input itself (`<span>
  * intercepts pointer events`, `element is not visible`) though a user's click
- * there reaches it through the label.
+ * there reaches it through the label. Returns that label, or null to click the
+ * control itself. The choice reads the control and its labels only, past
+ * anything else on top (a loading mask, a modal): Playwright's checks on the
+ * label wait that out, or fail on it. Throws `UNRENDERED` while none of them
+ * is rendered (a dialog not open yet), since nothing tells the two apart then.
  */
-function pickStandIn(node: Element): StandIn | null {
+function pickStandIn(node: Element, unrendered: string): HTMLLabelElement | null {
   if (!(node instanceof HTMLInputElement) || (node.type !== 'checkbox' && node.type !== 'radio') || node.matches(':disabled')) {
     return null;
   }
@@ -115,67 +115,92 @@ function pickStandIn(node: Element): StandIn | null {
   const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button"],[role="link"]';
   const hasBox = ({ width, height }: DOMRect): boolean => width > 0 && height > 0;
   const centre = ({ left, top, width, height }: DOMRect): [number, number] => [left + width / 2, top + height / 2];
-  const pressesInteractive = (label: HTMLLabelElement, hit: Element | null): boolean => {
-    const interactive = hit?.closest(INTERACTIVE) ?? null;
-    return interactive !== null && label.contains(interactive);
-  };
+  const topmost = (x: number, y: number): Element | undefined =>
+    root.elementsFromPoint(x, y).find((hit) => hit === node || labels.some((label) => label.contains(hit)));
+  const pressesInteractive = (label: HTMLLabelElement, hit: Element | undefined): boolean =>
+    label.contains(hit?.closest(INTERACTIVE) ?? null);
   node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   const box = node.getBoundingClientRect();
   if (!hasBox(box)) {
-    const index = labels.findIndex((label) => {
-      const outer = label.getBoundingClientRect();
-      return (
-        hasBox(outer) &&
-        label.checkVisibility({ visibilityProperty: true }) &&
-        !pressesInteractive(label, root.elementFromPoint(...centre(outer)))
-      );
-    });
-    return index === -1 ? null : { labelIndex: index };
+    const shown = labels.filter((label) => hasBox(label.getBoundingClientRect()) && label.checkVisibility({ visibilityProperty: true }));
+    if (shown.length === 0) throw new Error(unrendered);
+    return (
+      shown.find((label) => {
+        label.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return !pressesInteractive(label, topmost(...centre(label.getBoundingClientRect())));
+      }) ?? null
+    );
   }
-  const hit = root.elementFromPoint(...centre(box));
-  if (hit === null || hit === node) return null;
-  for (const [index, label] of labels.entries()) {
-    if (!label.contains(hit)) continue;
-    if (pressesInteractive(label, hit)) return null;
-    const outer = label.getBoundingClientRect();
-    const x = box.left + box.width / 2 - outer.left;
-    const y = box.top + box.height / 2 - outer.top;
-    const inside = x >= 0 && y >= 0 && x <= outer.width && y <= outer.height;
-    return inside ? { labelIndex: index, position: { x, y } } : { labelIndex: index };
-  }
-  return null;
+  const [x, y] = centre(box);
+  const hit = topmost(x, y);
+  if (hit === undefined) throw new Error(unrendered);
+  const label = labels.find((own) => own.contains(hit));
+  if (label === undefined || pressesInteractive(label, hit)) return null;
+  const outer = label.getBoundingClientRect();
+  return x >= outer.left && x <= outer.right && y >= outer.top && y <= outer.bottom ? label : null;
+}
+
+/**
+ * Runs in the page: where a click on the label lands, the centre of its
+ * control relative to the label, or none for a control with no box, which
+ * takes the label's centre.
+ */
+function controlPoint(label: HTMLLabelElement): { x: number; y: number } | null {
+  const box = label.control?.getBoundingClientRect();
+  if (box === undefined || box.width === 0 || box.height === 0) return null;
+  const outer = label.getBoundingClientRect();
+  return { x: box.left + box.width / 2 - outer.left, y: box.top + box.height / 2 - outer.top };
 }
 
 /**
  * Clicks a control with Playwright's actionability checks, through its own
  * label when `pickStandIn` names one. The checks then run on the label, so
- * anything else on top, such as a modal, still fails NOT_ACTIONABLE.
+ * anything else on top, such as a modal, still fails NOT_ACTIONABLE. The
+ * choice is read again until the control or a label renders, within the
+ * deadline.
  */
 async function clickControl(
   target: ActionTarget,
-  options: { timeout: number; modifiers?: KeyModifier[] },
+  verb: 'tap' | 'check' | 'uncheck',
+  options: { timeout: number; signal: AbortSignal; modifiers?: KeyModifier[] },
 ): Promise<void> {
+  const { signal, ...click } = options;
   const deadline = new Deadline(options.timeout);
   const remaining = (): number => Math.max(1, deadline.remaining());
-  const standIn =
-    target.kind === 'locator'
-      ? await target.locator.evaluate(pickStandIn, undefined, { timeout: options.timeout })
-      : await target.element.evaluate(pickStandIn);
-  const labelAt = (node: Element, index: number): Element | null =>
-    node instanceof HTMLInputElement ? (node.labels?.[index] ?? null) : null;
-  const label =
-    standIn === null
-      ? null
-      : target.kind === 'locator'
-        ? (await target.locator.evaluateHandle(labelAt, standIn.labelIndex, { timeout: remaining() })).asElement()
-        : (await target.element.evaluateHandle(labelAt, standIn.labelIndex)).asElement();
-  if (standIn === null || label === null) {
-    await asActionable(target).click({ ...options, timeout: remaining() });
+  // Set inside the poll; the assertion keeps TypeScript from narrowing it to null here.
+  let label = null as ElementHandle<HTMLLabelElement> | null;
+  let firstRead = true;
+  await pollCondition({
+    deadline,
+    signal,
+    negated: false,
+    evaluate: async () => {
+      const first = firstRead;
+      firstRead = false;
+      try {
+        const handle =
+          target.kind === 'locator'
+            ? await target.locator.evaluateHandle(pickStandIn, UNRENDERED, { timeout: remaining() })
+            : await target.element.evaluateHandle(pickStandIn, UNRENDERED);
+        label = handle.asElement();
+        return true;
+      } catch (cause) {
+        if (message(cause).includes(UNRENDERED)) return undefined;
+        // A read after one that found nothing rendered times out only at the deadline, which ends the poll.
+        if (!first && isPwTimeout(cause)) return undefined;
+        throw cause;
+      }
+    },
+    onTimeout: () =>
+      new EngineError('NOT_ACTIONABLE', `${verb} did not become actionable in time: ${UNRENDERED}`, { retryable: false }),
+  });
+  if (label === null) {
+    await asActionable(target).click({ ...click, timeout: remaining() });
     return;
   }
-  const { position } = standIn;
   try {
-    await label.click({ ...options, timeout: remaining(), ...(position === undefined ? {} : { position }) });
+    const position = await label.evaluate(controlPoint);
+    await label.click({ ...click, timeout: remaining(), ...(position === null ? {} : { position }) });
   } finally {
     void label.dispose().catch(() => undefined);
   }
@@ -203,7 +228,7 @@ export async function dispatchLocatorAction(
   const locator = asActionable(target);
   switch (action.kind) {
     case 'tap':
-      await clickControl(target, { timeout, ...heldKeys(action) });
+      await clickControl(target, 'tap', { timeout, signal: operation.signal, ...heldKeys(action) });
       return;
     case 'doubleTap':
       await locator.dblclick({ timeout, ...heldKeys(action) });

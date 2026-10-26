@@ -223,6 +223,40 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
     }
   });
 
+  it.each(ELEMENT_PLUS_CASES)('waits out a loading mask over an Element Plus %s', async (_, selector) => {
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      await page.setContent(`${ELEMENT_PLUS_PAGE}<div class="modal"></div>
+        <script>setTimeout(() => document.querySelector('.modal').remove(), 300)</script>`);
+      expect(await perform(await targetOf(kind, selector), action)).toBeUndefined();
+      expect(await page.isChecked(selector)).toBe(true);
+    }
+  });
+
+  it.each(ELEMENT_PLUS_CASES)('waits for an Element Plus %s in a dialog that opens later', async (_, selector) => {
+    for (const display of ['display:none', 'visibility:hidden']) {
+      for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+        await page.setContent(`<style>${ELEMENT_PLUS_CSS}</style><div id="dialog" style="${display}">${ELEMENT_PLUS_CONTROLS}</div>
+          <script>setTimeout(() => document.getElementById('dialog').removeAttribute('style'), 300)</script>`);
+        expect(await perform(await targetOf(kind, selector), action)).toBeUndefined();
+        expect(await page.isChecked(selector)).toBe(true);
+      }
+    }
+  });
+
+  it('still refuses a radio whose label covers it from outside the label box', async () => {
+    await page.setContent(`
+      <label style="display:inline-block;width:60px;height:20px">Pick<input type="radio" id="r"
+        style="position:absolute;left:200px;top:100px;opacity:0;z-index:-1"><span
+        style="position:absolute;left:190px;top:90px;width:40px;height:40px;background:#fff"></span></label>`);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      expect(await perform(await targetOf(kind, '#r'), action)).toMatchObject({
+        code: 'NOT_ACTIONABLE',
+        message: expect.stringContaining('intercepts pointer events'),
+      });
+      expect(await page.isChecked('#r')).toBe(false);
+    }
+  });
+
   it('checks a boxless checkbox through its first visible label, past a hidden one', async () => {
     await page.setContent(`
       <input type="checkbox" id="c" style="display:none">
@@ -284,8 +318,13 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
     await page.setContent(`
       <input type="checkbox" id="c" style="display:none">
       <label for="c" style="display:none">A</label>`);
-    expect(await perform(await targetOf(kind, '#c'), { kind: 'check' })).toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(await page.isChecked('#c')).toBe(false);
+    for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
+      expect(await perform(await targetOf(kind, '#c'), action)).toMatchObject({
+        code: 'NOT_ACTIONABLE',
+        message: `${action.kind} did not become actionable in time: the control and its labels are not visible`,
+      });
+      expect(await page.isChecked('#c')).toBe(false);
+    }
   });
 
   it('still refuses a disabled Element Plus radio-button', async () => {
