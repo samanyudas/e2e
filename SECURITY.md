@@ -119,8 +119,9 @@ telemetry: one `e2e_run_completed` event per run that returns a report, under
 the same opt-outs.
 Telemetry falls under the disclosure policy above.
 
-There is no crash reporting. The complete list of outbound connections a run
-can make:
+There is no crash reporting. The main outbound connections are below; the
+full list, integrations and reporters included, is under
+[Outbound connections](https://e2e.tester.army/docs/reference/security#outbound-connections):
 
 - one telemetry request per CLI invocation or completed `run()` to
   `eu.i.posthog.com`, plus at most one per session that `e2e mcp` serves,
@@ -133,8 +134,9 @@ can make:
   `e2e mcp` or `e2e upgrade`, or under `E2E_UPDATE_CHECK_DISABLED`,
   `NO_UPDATE_NOTIFIER`, `E2E_TELEMETRY_DISABLED`, or `DO_NOT_TRACK`), and
   once per `e2e feedback` unless `--allow-outdated`, `E2E_TELEMETRY_DISABLED`,
-  or `DO_NOT_TRACK` is set; `e2e upgrade` also reads the version of each e2e
-  package the project lists, from `npm_config_registry` when it is set
+  or `DO_NOT_TRACK` is set; `e2e upgrade` also reads the versions of every
+  `e2e` or `@e2e-dev/*` package the project lists with a registry version,
+  from `npm_config_registry` when it is set
 - the model endpoint owned by the AI SDK instance in your config (agent steps
   only; deterministic suites make no model calls, and cached steps replay
   without one)
