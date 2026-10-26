@@ -1082,8 +1082,12 @@ Release notes: https://github.com/tester-army/e2e/releases/tag/e2e%400.21.2
 - **A failed install.** `package.json` and any lockfile the install changed
   go back as they were. `node_modules` can keep some new versions until the
   next install.
-- **The saved range.** A named version or a prerelease is pinned exactly. A
-  dist-tag keeps the `^` or `~` of the old spec.
+- **The saved range.** Only a package whose installed version changes gets
+  a new spec. A named version or a prerelease is pinned exactly. A dist-tag
+  keeps the `^` or `~` of the old spec. A package already at the target
+  keeps its spec, so `e2e upgrade 0.21.3` over an installed 0.21.3 leaves
+  `^0.21.3` as written. To pin it, edit `package.json`. Without
+  `node_modules`, a spec that differs from the pin counts as a change.
 - **Left alone.** A package linked with `workspace:`, `file:`, `link:`,
   `catalog:`, a path, or a git URL, and an `@e2e-dev/*` package the registry
   doesn't have. When `e2e` itself is linked, the command exits 2.
