@@ -183,6 +183,7 @@ async function clickControl(
             ? await target.locator.evaluateHandle(pickStandIn, UNRENDERED, { timeout: remaining() })
             : await target.element.evaluateHandle(pickStandIn, UNRENDERED);
         label = handle.asElement();
+        if (label === null) void handle.dispose().catch(() => undefined);
         return true;
       } catch (cause) {
         if (message(cause).includes(UNRENDERED)) return undefined;
@@ -194,12 +195,15 @@ async function clickControl(
     onTimeout: () =>
       new EngineError('NOT_ACTIONABLE', `${verb} did not become actionable in time: ${UNRENDERED}`, { retryable: false }),
   });
+  // The operation abandons this call when cancelled; a read still in flight then must not lead to a click.
   if (label === null) {
+    signal.throwIfAborted();
     await asActionable(target).click({ ...click, timeout: remaining() });
     return;
   }
   try {
     const position = await label.evaluate(controlPoint);
+    signal.throwIfAborted();
     await label.click({ ...click, timeout: remaining(), ...(position === null ? {} : { position }) });
   } finally {
     void label.dispose().catch(() => undefined);

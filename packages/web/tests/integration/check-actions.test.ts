@@ -364,3 +364,22 @@ describe('a control its own label covers, inside a frame', () => {
     expect(await locator.isChecked()).toBe(true);
   });
 });
+
+describe('an action cancelled while its stand-in read is in flight', () => {
+  it.each(KINDS)('clicks nothing through the %s target', async (kind) => {
+    for (const [selector, action] of [['#install', { kind: 'tap' }], ['#install', { kind: 'check' }], ['#plain', { kind: 'tap' }]] as const) {
+      await page.setContent(`${ELEMENT_PLUS_PAGE}<input type="checkbox" id="plain">`);
+      const target = await targetOf(kind, selector);
+      // Holds the page's main thread, so the read waits behind it until after the abort.
+      await page.evaluate(() => setTimeout(() => { const until = Date.now() + 400; while (Date.now() < until); }, 0));
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error('cancelled')), 100);
+      await expect(
+        dispatchLocatorAction(target, action, { timeoutMs: 2000, signal: controller.signal }, () => {
+          throw new Error('no second target');
+        }),
+      ).rejects.toThrow('cancelled');
+      expect(await page.isChecked(selector)).toBe(false);
+    }
+  });
+});
