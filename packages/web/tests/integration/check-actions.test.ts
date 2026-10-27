@@ -55,10 +55,13 @@ async function targetOf(kind: (typeof KINDS)[number], selector: string): Promise
   return { kind, element };
 }
 
+/** A refusal waits out the whole deadline, so the cases that expect one take a short one. */
+const REFUSAL_TIMEOUT_MS = 500;
+
 /** Performs one action and returns the contract error it failed with, classified as the engine reports it. */
-async function perform(target: ActionTarget, action: LocatorAction): Promise<Error | undefined> {
+async function perform(target: ActionTarget, action: LocatorAction, timeoutMs = 2000): Promise<Error | undefined> {
   try {
-    await dispatchLocatorAction(target, action, { timeoutMs: 2000, signal: new AbortController().signal }, () => {
+    await dispatchLocatorAction(target, action, { timeoutMs, signal: new AbortController().signal }, () => {
       throw new Error('no second target');
     });
     return undefined;
@@ -218,7 +221,7 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
   it.each(ELEMENT_PLUS_CASES)('still refuses an Element Plus %s under a modal', async (_, selector) => {
     await page.setContent(`${ELEMENT_PLUS_PAGE}<div class="modal"></div>`);
     for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
-      expect(await perform(await targetOf(kind, selector), action)).toMatchObject({ code: 'NOT_ACTIONABLE' });
+      expect(await perform(await targetOf(kind, selector), action, REFUSAL_TIMEOUT_MS)).toMatchObject({ code: 'NOT_ACTIONABLE' });
       expect(await page.isChecked(selector)).toBe(false);
     }
   });
@@ -249,7 +252,7 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
         style="position:absolute;left:200px;top:100px;opacity:0;z-index:-1"><span
         style="position:absolute;left:190px;top:90px;width:40px;height:40px;background:#fff"></span></label>`);
     for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
-      expect(await perform(await targetOf(kind, '#r'), action)).toMatchObject({
+      expect(await perform(await targetOf(kind, '#r'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({
         code: 'NOT_ACTIONABLE',
         message: expect.stringContaining('intercepts pointer events'),
       });
@@ -280,7 +283,7 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
       <label class="el-radio-button"><input class="el-radio-button__original-radio" type="radio" name="mode" id="install">
         <a href="#went" class="el-radio-button__inner">安装</a></label>`);
     for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
-      expect(await perform(await targetOf(kind, '#install'), action)).toMatchObject({
+      expect(await perform(await targetOf(kind, '#install'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({
         code: 'NOT_ACTIONABLE',
         message: expect.stringContaining('intercepts pointer events'),
       });
@@ -294,7 +297,7 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
       <input type="checkbox" id="c" style="display:none">
       <label for="c" style="display:inline-block"><a href="#went">Terms</a></label>`);
     for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
-      expect(await perform(await targetOf(kind, '#c'), action)).toMatchObject({
+      expect(await perform(await targetOf(kind, '#c'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({
         code: 'NOT_ACTIONABLE',
         message: expect.stringContaining('not visible'),
       });
@@ -306,7 +309,7 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
   it('still refuses an Element Plus radio-button a disabled fieldset holds', async () => {
     await page.setContent(`<style>${ELEMENT_PLUS_CSS}</style><fieldset disabled>${ELEMENT_PLUS_CONTROLS}</fieldset>`);
     for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
-      expect(await perform(await targetOf(kind, '#install'), action)).toMatchObject({
+      expect(await perform(await targetOf(kind, '#install'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({
         code: 'NOT_ACTIONABLE',
         message: expect.stringContaining('not enabled'),
       });
@@ -319,7 +322,7 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
       <input type="checkbox" id="c" style="display:none">
       <label for="c" style="display:none">A</label>`);
     for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
-      expect(await perform(await targetOf(kind, '#c'), action)).toMatchObject({
+      expect(await perform(await targetOf(kind, '#c'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({
         code: 'NOT_ACTIONABLE',
         message: `${action.kind} did not become actionable in time: the control and its labels are not visible`,
       });
@@ -330,7 +333,7 @@ describe.each(KINDS)('a control its own label covers, through the %s target', (k
   it('still refuses a disabled Element Plus radio-button', async () => {
     await page.setContent(ELEMENT_PLUS_PAGE.replace('id="install"', 'id="install" disabled'));
     for (const action of [{ kind: 'check' }, { kind: 'tap' }] as const) {
-      expect(await perform(await targetOf(kind, '#install'), action)).toMatchObject({ code: 'NOT_ACTIONABLE' });
+      expect(await perform(await targetOf(kind, '#install'), action, REFUSAL_TIMEOUT_MS)).toMatchObject({ code: 'NOT_ACTIONABLE' });
       expect(await page.isChecked('#install')).toBe(false);
     }
   });
