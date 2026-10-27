@@ -2292,6 +2292,7 @@ describe('snapshot generations', () => {
   });
 
   it('pins a control found again after a transition to the capture it was found in', async () => {
+    autoAdvanceTimers();
     const h = harness();
     await openAttempt(h);
     generations(h);
@@ -2302,6 +2303,7 @@ describe('snapshot generations', () => {
   });
 
   it('drags from a source found again after a transition to a target located before it', async () => {
+    autoAdvanceTimers();
     const h = harness();
     await openAttempt(h);
     generations(h);
