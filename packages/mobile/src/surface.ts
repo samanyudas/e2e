@@ -1147,14 +1147,14 @@ export class AgentDeviceSurface {
 
   /**
    * The same control in the newest capture: the binding itself when it came
-   * from that capture, else found there again, else as it was, for
-   * agent-device to refuse as stale.
+   * from that capture, else found there again where it was, else as it was,
+   * for agent-device to refuse as stale.
    */
   private current(entry: NodeBinding): NodeBinding {
     const index = this.latestIndex;
     if (index === undefined || entry.refsGeneration === this.latestGeneration) return entry;
     const found = this.refind(entry, index);
-    return found === undefined ? entry : this.bind(found, index, this.latestGeneration);
+    return found === undefined || !sameRect(found.node.rect, entry.node.rect) ? entry : this.bind(found, index, this.latestGeneration);
   }
 
   /**

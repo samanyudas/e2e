@@ -2232,11 +2232,11 @@ describe('snapshot generations', () => {
    * agent-device's ref admission: every capture starts a new generation, and
    * a ref pinned with `~s<generation>` is refused unless it names the newest.
    */
-  function generations(h: Harness): void {
+  function generations(h: Harness, nodes: () => readonly RawNode[] = () => SETTINGS_NODES): void {
     let generation = 6;
     h.fake.respond('capture.snapshot', () => {
       generation += 1;
-      return { ...SETTINGS_SNAPSHOT, refsGeneration: generation };
+      return { ...SETTINGS_SNAPSHOT, nodes: nodes(), refsGeneration: generation };
     });
     const admit = (ref: string): void => {
       const pinned = /~s(\d+)$/.exec(ref);
@@ -2290,6 +2290,20 @@ describe('snapshot generations', () => {
     await h.engine.perform!(about!.ref, { kind: 'dragTo', target: back!.ref }, step);
     // The launch leaves the source in transition, so it is found again in a third capture.
     expect(h.fake.lastArgs('interactions.drag')).toEqual({ source: '@e4~s9', destination: '@e3~s9' });
+  });
+
+  it('keeps a drag source pinned to its own capture when a newer one lists it nowhere it was', async () => {
+    const h = harness({ transition: 0 });
+    await openAttempt(h);
+    const twin: RawNode = { ref: '@e11', index: 11, parentIndex: 0, depth: 1, type: 'cell', label: 'About', identifier: 'ABOUT', rect: { x: 0, y: 600, width: 390, height: 44 } };
+    let nodes: readonly RawNode[] = [...SETTINGS_NODES, twin];
+    generations(h, () => nodes);
+    const step: OperationContext = { ...operation(), origin: 'test' };
+    const [about] = await h.engine.locate!(testIdQuery('ABOUT'), step);
+    nodes = [...SETTINGS_NODES.filter((node) => node.label !== 'About'), twin];
+    const [back] = await h.engine.locate!(testIdQuery('BackButton'), step);
+    await expect(h.engine.perform!(about!.ref, { kind: 'dragTo', target: back!.ref }, step)).rejects.toMatchObject({ code: 'NODE_STALE' });
+    expect(h.fake.lastArgs('interactions.drag')).toEqual({ source: '@e4~s7', destination: '@e3~s8' });
   });
 });
 
