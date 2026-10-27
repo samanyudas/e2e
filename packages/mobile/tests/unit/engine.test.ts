@@ -2227,6 +2227,71 @@ describe('reference lifetime and cancellation', () => {
   });
 });
 
+describe('snapshot generations', () => {
+  /**
+   * agent-device's ref admission: every capture starts a new generation, and
+   * a ref pinned with `~s<generation>` is refused unless it names the newest.
+   */
+  function generations(h: Harness): void {
+    let generation = 6;
+    h.fake.respond('capture.snapshot', () => {
+      generation += 1;
+      return { ...SETTINGS_SNAPSHOT, refsGeneration: generation };
+    });
+    const admit = (ref: string): void => {
+      const pinned = /~s(\d+)$/.exec(ref);
+      if (pinned !== null && Number(pinned[1]) !== generation) {
+        throw new AppError('COMMAND_FAILED', `Ref ${ref} was minted from a superseded snapshot generation`, { reason: 'ref_generation_mismatch', dispatched: 'no' });
+      }
+    };
+    h.fake.respond('interactions.press', (args) => admit((args as { ref: string }).ref));
+    h.fake.respond('interactions.drag', (args) => {
+      const { source, destination } = args as { source: string; destination: string };
+      admit(source);
+      admit(destination);
+    });
+  }
+
+  it('pins every ref action to the capture that issued its ref', async () => {
+    const h = harness();
+    await openAttempt(h);
+    generations(h);
+    const op = operation();
+    const { root } = await h.engine.observe!(op);
+    const [about, toggle, back] = ['About', 'Airplane Mode', 'Back'].map((name) => named(root, name));
+    const before = h.fake.calls.length;
+    await h.engine.perform!(about!.ref, { kind: 'tap' }, op);
+    await h.engine.perform!(toggle!.ref, { kind: 'check' }, op);
+    await h.engine.perform!(about!.ref, { kind: 'dragTo', target: back!.ref }, op);
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['interactions.press', { ref: '@e4~s7', settle: true, settleQuietMs: 150 }],
+      ['interactions.press', { ref: '@e6~s7', settle: true, settleQuietMs: 150 }],
+      ['interactions.drag', { source: '@e4~s7', destination: '@e3~s7' }],
+    ]);
+  });
+
+  it('refuses a ref from a superseded capture as stale instead of acting on the newer one', async () => {
+    const h = harness();
+    await openAttempt(h);
+    generations(h);
+    const about = await observed(h, 'About');
+    await h.engine.locate!(testIdQuery('BackButton'), operation());
+    await expect(h.engine.perform!(about.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+    expect(h.fake.lastArgs('interactions.press')).toMatchObject({ ref: '@e4~s7' });
+  });
+
+  it('drags between nodes located in separate captures from the newest one', async () => {
+    const h = harness();
+    await openAttempt(h);
+    generations(h);
+    const step: OperationContext = { ...operation(), origin: 'test' };
+    const [about] = await h.engine.locate!(testIdQuery('ABOUT'), step);
+    const [back] = await h.engine.locate!(testIdQuery('BackButton'), step);
+    await h.engine.perform!(about!.ref, { kind: 'dragTo', target: back!.ref }, step);
+    expect(h.fake.lastArgs('interactions.drag')).toEqual({ source: '@e4~s8', destination: '@e3~s8' });
+  });
+});
+
 describe('video', () => {
   const recorder = (h: Harness, finalizeAt?: string) => {
     let requested: string | undefined;
