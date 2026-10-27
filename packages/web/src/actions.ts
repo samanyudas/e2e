@@ -167,8 +167,7 @@ async function clickControl(
   const { signal, ...click } = options;
   const deadline = new Deadline(options.timeout);
   const remaining = (): number => Math.max(1, deadline.remaining());
-  // Set inside the poll; the assertion keeps TypeScript from narrowing it to null here.
-  let label = null as ElementHandle<HTMLLabelElement> | null;
+  let label: ElementHandle<HTMLLabelElement> | undefined;
   let firstRead = true;
   await pollCondition({
     deadline,
@@ -182,8 +181,8 @@ async function clickControl(
           target.kind === 'locator'
             ? await target.locator.evaluateHandle(pickStandIn, UNRENDERED, { timeout: remaining() })
             : await target.element.evaluateHandle(pickStandIn, UNRENDERED);
-        label = handle.asElement();
-        if (label === null) void handle.dispose().catch(() => undefined);
+        label = handle.asElement() ?? undefined;
+        if (label === undefined) void handle.dispose().catch(() => undefined);
         return true;
       } catch (cause) {
         if (message(cause).includes(UNRENDERED)) return undefined;
@@ -196,7 +195,7 @@ async function clickControl(
       new EngineError('NOT_ACTIONABLE', `${verb} did not become actionable in time: ${UNRENDERED}`, { retryable: false }),
   });
   // The operation abandons this call when cancelled; a read still in flight then must not lead to a click.
-  if (label === null) {
+  if (label === undefined) {
     signal.throwIfAborted();
     await asActionable(target).click({ ...click, timeout: remaining() });
     return;
