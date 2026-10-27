@@ -424,9 +424,7 @@ export class AgentDeviceSurface {
   /** The screen as last projected before that action, to tell controls that were already there from ones that came with it. */
   private indexBeforeAction: readonly ProjectedNode[] | undefined;
   /** The most recent projection of the screen, from any observe or locate. */
-  private latestIndex: readonly ProjectedNode[] | undefined;
-  /** The capture generation of `latestIndex`. */
-  private latestGeneration: number | undefined;
+  private latest: ProjectedSnapshot | undefined;
   /** Budget a control that came with the last action gets to finish arriving; see DEFAULT_TRANSITION_MS. */
   private readonly transitionMs: number;
   /**
@@ -494,7 +492,7 @@ export class AgentDeviceSurface {
    * not yet arrived.
    */
   async screenCommand<T>(label: string, run: (client: AgentDeviceClient) => Promise<T>, signal: AbortSignal): Promise<T> {
-    const before = this.latestIndex;
+    const before = this.latest?.index;
     const result = await this.command(label, run, signal);
     this.markAction(before);
     return result;
@@ -997,9 +995,9 @@ export class AgentDeviceSurface {
         return `n${this.idCounter}`;
       },
       viewport: raw.viewport,
+      refsGeneration: raw.refsGeneration,
     });
-    this.latestIndex = projected.index;
-    this.latestGeneration = raw.refsGeneration;
+    this.latest = projected;
     const read = projected.viewport;
     if (read !== undefined && (this.knownViewport === undefined || sameScreen(read, this.knownViewport))) this.knownViewport = read;
     return projected;
@@ -1051,7 +1049,7 @@ export class AgentDeviceSurface {
   async observe(operation: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot> {
     const raw = await this.snapshotOrEmpty(operation, this.options.snapshot === 'interactive');
     const projected = this.project(raw);
-    this.generation = new Map(projected.index.map((entry) => [entry.id, this.bind(entry, projected.index, raw.refsGeneration)]));
+    this.generation = new Map(projected.index.map((entry) => [entry.id, this.bind(entry, projected)]));
     const viewport = await this.viewportFor(projected, operation.signal);
     const location = screenLocation(raw.appBundleId ?? raw.appName ?? this.appIdentity, screenTitle(projected));
     const capture = options?.pixels === true ? await this.capturePixels(operation, projected, viewport, { normalizeStatusBar: options.comparable === true }) : undefined;
@@ -1073,7 +1071,7 @@ export class AgentDeviceSurface {
     const projected = this.project(raw);
     this.traceScreen(raw, projected);
     const matches = resolveExpression(expression, projected.index, this.options.platform);
-    for (const entry of matches) this.located.set(entry.id, this.bind(entry, projected.index, raw.refsGeneration));
+    for (const entry of matches) this.located.set(entry.id, this.bind(entry, projected));
     for (const oldest of this.located.keys()) {
       if (this.located.size <= MAX_LOCATED_REFS) break;
       this.located.delete(oldest);
@@ -1139,22 +1137,27 @@ export class AgentDeviceSurface {
   }
 
   /** Copies the fields actions use and pre-resolves a toggle's inner control. */
-  private bind(entry: ProjectedNode, snapshot: readonly ProjectedNode[], refsGeneration: number | undefined): NodeBinding {
+  private bind(entry: ProjectedNode, projected: ProjectedSnapshot): NodeBinding {
     const { children: _children, ...node } = entry.node;
-    const control = this.controlOf(entry, snapshot);
-    return { id: entry.id, ref: entry.ref, node, controlRef: control.ref, refsGeneration };
+    const control = this.controlOf(entry, projected.index);
+    return { id: entry.id, ref: entry.ref, node, controlRef: control.ref, refsGeneration: projected.refsGeneration };
   }
 
-  /**
-   * The same control in the newest capture: the binding itself when it came
-   * from that capture, else found there again where it was, else as it was,
-   * for agent-device to refuse as stale.
-   */
+  /** The same control in the newest capture: the binding itself when it came from that capture, else found there again where it was. */
   private current(entry: NodeBinding): NodeBinding {
-    const index = this.latestIndex;
-    if (index === undefined || entry.refsGeneration === this.latestGeneration) return entry;
+    const latest = this.latest;
+    if (latest === undefined || entry.refsGeneration === latest.refsGeneration) return entry;
+    const found = this.samePlace(entry, latest.index);
+    if (found === undefined) {
+      throw new EngineError('NODE_STALE', `node ${entry.id} changed since it was located; re-resolve`, { retryable: true });
+    }
+    return this.bind(found, latest);
+  }
+
+  /** The node a binding stands for in a snapshot, when it is still where it was. */
+  private samePlace(entry: NodeBinding, index: readonly ProjectedNode[]): ProjectedNode | undefined {
     const found = this.refind(entry, index);
-    return found === undefined || !sameRect(found.node.rect, entry.node.rect) ? entry : this.bind(found, index, this.latestGeneration);
+    return found !== undefined && sameRect(found.node.rect, entry.node.rect) ? found : undefined;
   }
 
   /**
@@ -1203,10 +1206,7 @@ export class AgentDeviceSurface {
     const remaining = this.transitionMs - since;
     if (remaining <= 0) return entry;
     const before = this.indexBeforeAction;
-    if (before !== undefined) {
-      const prior = this.refind(entry, before);
-      if (prior !== undefined && sameRect(prior.node.rect, entry.node.rect)) return entry;
-    }
+    if (before !== undefined && this.samePlace(entry, before) !== undefined) return entry;
     await sleep(remaining, operation.signal);
     // The sleep resolves on abort; the action behind it must not go out once
     // the caller has already been told the operation was cancelled.
@@ -1218,10 +1218,9 @@ export class AgentDeviceSurface {
 
   /** The same control in a fresh snapshot; the binding as it was when the snapshot no longer lists it. */
   private async relocated(entry: NodeBinding, operation: OperationContext): Promise<NodeBinding> {
-    const raw = await this.snapshotOrEmpty(operation, false);
-    const projected = this.project(raw);
+    const projected = this.project(await this.snapshotOrEmpty(operation, false));
     const found = this.refind(entry, projected.index);
-    return found === undefined ? entry : this.bind(found, projected.index, raw.refsGeneration);
+    return found === undefined ? entry : this.bind(found, projected);
   }
 
   /**
@@ -1251,7 +1250,7 @@ export class AgentDeviceSurface {
     // chrome flow that way. Only the settle wait varies here, by origin.
     if (ref.id === ROOT_ID) {
       if (action.kind !== 'swipe') throw notActionable(`the screen root takes swipe only, not ${action.kind}; act on a node`);
-      const before = this.latestIndex;
+      const before = this.latest?.index;
       await this.command('swipe', (client) => input.send(() => client.interactions.scroll({ direction: action.direction, ...settle })), operation.signal);
       this.markAction(before);
       return;
@@ -1264,7 +1263,7 @@ export class AgentDeviceSurface {
     if ((action.kind === 'check' || action.kind === 'uncheck') && entry.node.states?.checked === (action.kind === 'check')) {
       return;
     }
-    const before = this.latestIndex;
+    const before = this.latest?.index;
     const run = async (): Promise<unknown> => {
       const target = deterministic ? await this.settled(entry, operation) : entry;
       switch (action.kind) {
@@ -1375,7 +1374,7 @@ export class AgentDeviceSurface {
    */
   async performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext, input: InputBudget): Promise<void> {
     const settle = operation.origin === 'test' ? {} : this.settleOptions;
-    const before = this.latestIndex;
+    const before = this.latest?.index;
     const holdMs = action.kind === 'longPress' ? (action.durationMs ?? DEFAULT_LONG_PRESS_MS) : action.kind === 'swipeTo' ? action.durationMs : undefined;
     await this.command(`${action.kind} at point`, (client) => input.send(() => pointerInteraction(client, point, action, settle), holdMs), operation.signal);
     this.markAction(before);
@@ -1391,7 +1390,7 @@ export class AgentDeviceSurface {
     if (options.replace) {
       throw unsupported('agent-device cannot clear the focused field without a node; type into a listed field by id to replace its value');
     }
-    const before = this.latestIndex;
+    const before = this.latest?.index;
     await this.command('keyboard.type', (client) => input.send(() => client.interactions.type({ text })), operation.signal);
     this.markAction(before);
   }
@@ -1411,7 +1410,7 @@ export class AgentDeviceSurface {
     if (parsed.modifiers.length > 0) {
       throw unsupported(`agent-device cannot hold ${parsed.modifiers.join('+')} on a device surface; press the key alone`);
     }
-    const before = this.latestIndex;
+    const before = this.latest?.index;
     if (parsed.key.kind === 'named' && parsed.key.name === 'Enter') {
       await this.command('keyboard.press', (client) => input.send(() => client.command.keyboard({ action: 'enter' })), operation.signal);
     } else if (parsed.key.kind === 'char' || parsed.key.name === 'Space') {
@@ -1432,7 +1431,7 @@ export class AgentDeviceSurface {
    * in {@link dismissKeyboardByGesture}.
    */
   async dismissKeyboard(signal: AbortSignal, input?: InputBudget): Promise<void> {
-    const before = this.latestIndex;
+    const before = this.latest?.index;
     try {
       await this.command('keyboard.dismiss', (client) => sendInput(input, () => client.command.keyboard({ action: 'dismiss' })), signal);
     } catch (cause) {
@@ -1511,7 +1510,7 @@ export class AgentDeviceSurface {
 
   async back(operation: OperationContext, input: InputBudget): Promise<void> {
     const settle = operation.origin === 'test' ? {} : this.settleOptions;
-    const before = this.latestIndex;
+    const before = this.latest?.index;
     await this.command('back', (client) => input.send(() => client.command.back({ ...settle })), operation.signal);
     this.markAction(before);
   }

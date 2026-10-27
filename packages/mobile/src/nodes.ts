@@ -35,6 +35,8 @@ export interface ProjectedSnapshot {
   /** Every node in document order, parents before children. */
   readonly index: readonly ProjectedNode[];
   readonly viewport: ViewportSize | undefined;
+  /** The agent-device capture the refs were issued from; undefined from one that reports none. */
+  readonly refsGeneration: number | undefined;
 }
 
 /**
@@ -406,7 +408,7 @@ function isSystemBar(node: RawNode, screen: ViewportSize | undefined, displayOnl
  */
 export function projectSnapshot(
   raw: readonly RawNode[],
-  options: { readonly mintId: () => string; readonly viewport?: ViewportSize | undefined },
+  options: { readonly mintId: () => string; readonly viewport?: ViewportSize | undefined; readonly refsGeneration?: number | undefined },
 ): ProjectedSnapshot {
   const viewport = options.viewport ?? viewportOf(raw);
   const parents = parentPositions(raw);
@@ -506,7 +508,7 @@ export function projectSnapshot(
   const rootNodes = roots
     .filter((position) => !isSystemBar(raw[position] as RawNode, viewport, () => displayOnly(position)))
     .map((position) => build(position, undefined));
-  return { roots: rootNodes, index, viewport };
+  return { roots: rootNodes, index, viewport, refsGeneration: options.refsGeneration };
 }
 
 /** Quotes one selector term value the way agent-device's parser reads it back. */

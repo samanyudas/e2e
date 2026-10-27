@@ -2281,6 +2281,27 @@ describe('snapshot generations', () => {
   });
 
   it('drags between nodes located in separate captures from the newest one', async () => {
+    const h = harness({ transition: 0 });
+    await openAttempt(h);
+    generations(h);
+    const step: OperationContext = { ...operation(), origin: 'test' };
+    const [about] = await h.engine.locate!(testIdQuery('ABOUT'), step);
+    const [back] = await h.engine.locate!(testIdQuery('BackButton'), step);
+    await h.engine.perform!(about!.ref, { kind: 'dragTo', target: back!.ref }, step);
+    expect(h.fake.lastArgs('interactions.drag')).toEqual({ source: '@e4~s8', destination: '@e3~s8' });
+  });
+
+  it('pins a control found again after a transition to the capture it was found in', async () => {
+    const h = harness();
+    await openAttempt(h);
+    generations(h);
+    const step: OperationContext = { ...operation(), origin: 'test' };
+    const about = await observed(h, 'About');
+    await h.engine.perform!(about.ref, { kind: 'tap' }, step);
+    expect(h.fake.lastArgs('interactions.press')).toEqual({ ref: '@e4~s8' });
+  });
+
+  it('drags from a source found again after a transition to a target located before it', async () => {
     const h = harness();
     await openAttempt(h);
     generations(h);
@@ -2292,7 +2313,7 @@ describe('snapshot generations', () => {
     expect(h.fake.lastArgs('interactions.drag')).toEqual({ source: '@e4~s9', destination: '@e3~s9' });
   });
 
-  it('keeps a drag source pinned to its own capture when a newer one lists it nowhere it was', async () => {
+  it('refuses a drag whose source a newer capture lists nowhere it was, before sending it', async () => {
     const h = harness({ transition: 0 });
     await openAttempt(h);
     const twin: RawNode = { ref: '@e11', index: 11, parentIndex: 0, depth: 1, type: 'cell', label: 'About', identifier: 'ABOUT', rect: { x: 0, y: 600, width: 390, height: 44 } };
@@ -2302,8 +2323,8 @@ describe('snapshot generations', () => {
     const [about] = await h.engine.locate!(testIdQuery('ABOUT'), step);
     nodes = [...SETTINGS_NODES.filter((node) => node.label !== 'About'), twin];
     const [back] = await h.engine.locate!(testIdQuery('BackButton'), step);
-    await expect(h.engine.perform!(about!.ref, { kind: 'dragTo', target: back!.ref }, step)).rejects.toMatchObject({ code: 'NODE_STALE' });
-    expect(h.fake.lastArgs('interactions.drag')).toEqual({ source: '@e4~s7', destination: '@e3~s8' });
+    await expect(h.engine.perform!(about!.ref, { kind: 'dragTo', target: back!.ref }, step)).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+    expect(h.fake.methods()).not.toContain('interactions.drag');
   });
 });
 
