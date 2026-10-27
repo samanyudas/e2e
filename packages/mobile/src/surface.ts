@@ -130,9 +130,10 @@ export interface OpenAppOptions {
 /**
  * The snapshot fields this engine reads off agent-device's response. `keyboard`
  * is the band the capture's producer measured: `visible` with its frame,
- * `absent`, or that it could not look.
+ * `absent`, or that it could not look. `refsGeneration` is the capture its
+ * refs were issued from.
  */
-type RawSnapshot = Partial<Pick<CaptureSnapshotResult, 'nodes' | 'viewport' | 'truncated' | 'appName' | 'appBundleId' | 'snapshotQuality' | 'keyboard'>>;
+type RawSnapshot = Partial<Pick<CaptureSnapshotResult, 'nodes' | 'viewport' | 'truncated' | 'appName' | 'appBundleId' | 'snapshotQuality' | 'keyboard' | 'refsGeneration'>>;
 
 /** Platform element types that are the soft keyboard or one of its keys, as agent-device names them. */
 const KEYBOARD_TYPES: ReadonlySet<string> = new Set(['keyboard', 'key']);
@@ -196,6 +197,8 @@ interface NodeBinding {
   readonly ref: string;
   readonly node: SemanticNode;
   readonly controlRef: string;
+  /** The capture `ref` and `controlRef` came from, pinned on every action so agent-device refuses them once a newer capture supersedes it. */
+  readonly refsGeneration: number | undefined;
 }
 
 
@@ -422,6 +425,8 @@ export class AgentDeviceSurface {
   private indexBeforeAction: readonly ProjectedNode[] | undefined;
   /** The most recent projection of the screen, from any observe or locate. */
   private latestIndex: readonly ProjectedNode[] | undefined;
+  /** The capture generation of `latestIndex`. */
+  private latestGeneration: number | undefined;
   /** Budget a control that came with the last action gets to finish arriving; see DEFAULT_TRANSITION_MS. */
   private readonly transitionMs: number;
   /**
@@ -994,6 +999,7 @@ export class AgentDeviceSurface {
       viewport: raw.viewport,
     });
     this.latestIndex = projected.index;
+    this.latestGeneration = raw.refsGeneration;
     const read = projected.viewport;
     if (read !== undefined && (this.knownViewport === undefined || sameScreen(read, this.knownViewport))) this.knownViewport = read;
     return projected;
@@ -1045,7 +1051,7 @@ export class AgentDeviceSurface {
   async observe(operation: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot> {
     const raw = await this.snapshotOrEmpty(operation, this.options.snapshot === 'interactive');
     const projected = this.project(raw);
-    this.generation = new Map(projected.index.map((entry) => [entry.id, this.bind(entry, projected.index)]));
+    this.generation = new Map(projected.index.map((entry) => [entry.id, this.bind(entry, projected.index, raw.refsGeneration)]));
     const viewport = await this.viewportFor(projected, operation.signal);
     const location = screenLocation(raw.appBundleId ?? raw.appName ?? this.appIdentity, screenTitle(projected));
     const capture = options?.pixels === true ? await this.capturePixels(operation, projected, viewport, { normalizeStatusBar: options.comparable === true }) : undefined;
@@ -1067,7 +1073,7 @@ export class AgentDeviceSurface {
     const projected = this.project(raw);
     this.traceScreen(raw, projected);
     const matches = resolveExpression(expression, projected.index, this.options.platform);
-    for (const entry of matches) this.located.set(entry.id, this.bind(entry, projected.index));
+    for (const entry of matches) this.located.set(entry.id, this.bind(entry, projected.index, raw.refsGeneration));
     for (const oldest of this.located.keys()) {
       if (this.located.size <= MAX_LOCATED_REFS) break;
       this.located.delete(oldest);
@@ -1106,7 +1112,7 @@ export class AgentDeviceSurface {
   private actionTarget(entry: NodeBinding, control = false): { ref: string } {
     const ref = control ? entry.controlRef : entry.ref;
     if (ref === '') throw notActionable(`node ${entry.id} has no agent-device ref to act on`);
-    return { ref: `@${ref}` };
+    return { ref: entry.refsGeneration === undefined ? `@${ref}` : `@${ref}~s${entry.refsGeneration}` };
   }
 
   /**
@@ -1133,10 +1139,22 @@ export class AgentDeviceSurface {
   }
 
   /** Copies the fields actions use and pre-resolves a toggle's inner control. */
-  private bind(entry: ProjectedNode, snapshot: readonly ProjectedNode[]): NodeBinding {
+  private bind(entry: ProjectedNode, snapshot: readonly ProjectedNode[], refsGeneration: number | undefined): NodeBinding {
     const { children: _children, ...node } = entry.node;
     const control = this.controlOf(entry, snapshot);
-    return { id: entry.id, ref: entry.ref, node, controlRef: control.ref };
+    return { id: entry.id, ref: entry.ref, node, controlRef: control.ref, refsGeneration };
+  }
+
+  /**
+   * The same control in the newest capture: the binding itself when it came
+   * from that capture, else found there again, else as it was, for
+   * agent-device to refuse as stale.
+   */
+  private current(entry: NodeBinding): NodeBinding {
+    const index = this.latestIndex;
+    if (index === undefined || entry.refsGeneration === this.latestGeneration) return entry;
+    const found = this.refind(entry, index);
+    return found === undefined ? entry : this.bind(found, index, this.latestGeneration);
   }
 
   /**
@@ -1200,9 +1218,10 @@ export class AgentDeviceSurface {
 
   /** The same control in a fresh snapshot; the binding as it was when the snapshot no longer lists it. */
   private async relocated(entry: NodeBinding, operation: OperationContext): Promise<NodeBinding> {
-    const projected = this.project(await this.snapshotOrEmpty(operation, false));
+    const raw = await this.snapshotOrEmpty(operation, false);
+    const projected = this.project(raw);
     const found = this.refind(entry, projected.index);
-    return found === undefined ? entry : this.bind(found, projected.index);
+    return found === undefined ? entry : this.bind(found, projected.index, raw.refsGeneration);
   }
 
   /**
@@ -1293,10 +1312,13 @@ export class AgentDeviceSurface {
           return input.send(() => client.interactions.swipe(swipeWithin(rect, action.direction, action.momentum)));
         }
         case 'dragTo': {
-          const destination = this.resolveRef(action.target);
+          // A test locates the drop target in a capture of its own, after the
+          // source's; agent-device takes both refs from the newest one only.
+          const source = this.current(target);
+          const destination = this.current(this.resolveRef(action.target));
           return input.send(() =>
             client.interactions.drag({
-              source: this.actionTarget(target).ref,
+              source: this.actionTarget(source).ref,
               destination: this.actionTarget(destination).ref,
             }),
           );

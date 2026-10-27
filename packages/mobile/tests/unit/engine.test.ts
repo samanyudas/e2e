@@ -2288,7 +2288,8 @@ describe('snapshot generations', () => {
     const [about] = await h.engine.locate!(testIdQuery('ABOUT'), step);
     const [back] = await h.engine.locate!(testIdQuery('BackButton'), step);
     await h.engine.perform!(about!.ref, { kind: 'dragTo', target: back!.ref }, step);
-    expect(h.fake.lastArgs('interactions.drag')).toEqual({ source: '@e4~s8', destination: '@e3~s8' });
+    // The launch leaves the source in transition, so it is found again in a third capture.
+    expect(h.fake.lastArgs('interactions.drag')).toEqual({ source: '@e4~s9', destination: '@e3~s9' });
   });
 });
 
