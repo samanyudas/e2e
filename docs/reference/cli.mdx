@@ -1177,9 +1177,8 @@ bunx e2e feedback --type feature -m "Need a way to set the viewport per test" --
   `DO_NOT_TRACK=1` do: with either set, the command sends nothing, and a
   report it would have sent exits 2. So a CI job or a fleet that opted out
   sends nothing, even when an agent runs it. `--dry-run`,
-  `E2E_TELEMETRY_DEBUG=1`, and a bug without `--repro` never send, so they
-  still print and exit 0. `E2E_TELEMETRY_DEBUG=1` prints the event like
-  `--dry-run`.
+  `E2E_TELEMETRY_DEBUG=1` (prints the event like `--dry-run`), and a bug
+  without `--repro` send nothing anyway, so they exit 0.
 
 | Exit code | When |
 | --- | --- |
