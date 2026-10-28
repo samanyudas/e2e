@@ -1197,8 +1197,11 @@ export interface TargetApp {
    */
   launchArguments?: readonly string[] | undefined;
   /**
-   * Permissions a device app holds on every fresh launch, by name, each
-   * granted, denied, or reset before the app starts.
+   * Permissions the app holds, by name. A device app has each granted,
+   * denied, or reset before every fresh launch. A browser target takes
+   * `grant` only and holds it on every page of the attempt; what it leaves
+   * out is the browser's default, which headless Chromium refuses. The
+   * engine checks the names its platform knows.
    */
   permissions?: Readonly<Record<string, AppPermissionState>> | undefined;
   /**

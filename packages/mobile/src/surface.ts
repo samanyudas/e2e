@@ -49,10 +49,10 @@ import { pointerInteraction, DEFAULT_LONG_PRESS_MS } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import {
   isWithin,
+  mayTakeText,
   normalizeKind,
   projectSnapshot,
   ROOT_ID,
-  TEXT_INPUT_ROLES,
   screenRoot,
   screenTitle,
   type ProjectedNode,
@@ -204,6 +204,8 @@ interface NodeBinding {
   /** The capture `ref` and `controlRef` came from, pinned on every action so agent-device refuses them once a newer capture supersedes it. */
   readonly refsGeneration: number | undefined;
   readonly keyboardVisible: boolean;
+  /** Whether `fill` and `clear` may type into the node, judged with the children `node` leaves out. */
+  readonly takesText: boolean;
 }
 
 
@@ -1165,7 +1167,15 @@ export class AgentDeviceSurface {
   private bind(entry: ProjectedNode, snapshot: ProjectedScreen): NodeBinding {
     const { children: _children, ...node } = entry.node;
     const control = this.controlOf(entry, snapshot.index);
-    return { id: entry.id, ref: entry.ref, node, controlRef: control.ref, keyboardVisible: snapshot.keyboardVisible, refsGeneration: snapshot.refsGeneration };
+    return {
+      id: entry.id,
+      ref: entry.ref,
+      node,
+      controlRef: control.ref,
+      keyboardVisible: snapshot.keyboardVisible,
+      takesText: mayTakeText(entry.node),
+      refsGeneration: snapshot.refsGeneration,
+    };
   }
 
   /** The same control in the newest capture: the binding itself when it came from that capture, else found there again where it was. */
@@ -1288,9 +1298,9 @@ export class AgentDeviceSurface {
     }
     const entry = this.resolveRef(ref);
     const filling = action.kind === 'fill' || action.kind === 'clear';
-    if (filling && (entry.node.role === undefined || !TEXT_INPUT_ROLES.has(entry.node.role))) {
-      throw unsupported(`agent-device can only ${action.kind} editable fields; node ${entry.id} is ${entry.node.role ?? 'unknown'}`);
-    }
+    const refuseFill = (binding: NodeBinding): EngineError =>
+      unsupported(`agent-device can only ${action.kind} editable fields; node ${binding.id} is ${binding.node.role ?? 'unknown'}`);
+    if (filling && !entry.takesText) throw refuseFill(entry);
     const label = `perform ${action.kind}`;
     const client = this.requireClient();
     // A toggle already in the wanted state sends nothing, so it neither waits
@@ -1304,6 +1314,7 @@ export class AgentDeviceSurface {
       if (filling) {
         if (deterministic) await this.waitForTransition(entry, operation);
         target = await this.relocated(entry, operation, true);
+        if (!target.takesText) throw refuseFill(target);
       } else if (deterministic) {
         target = await this.settled(entry, operation);
       }
@@ -1395,17 +1406,17 @@ export class AgentDeviceSurface {
     if (parsed.modifiers.length > 0) {
       throw unsupported(`agent-device cannot hold ${parsed.modifiers.join('+')} on a device surface; press the key alone`);
     }
-    if (parsed.key.kind === 'named' && parsed.key.name === 'Enter') {
-      return input.send(() => client.command.keyboard({ action: 'enter' }));
+    const enter = parsed.key.kind === 'named' && parsed.key.name === 'Enter';
+    if (!enter && parsed.key.kind === 'named' && parsed.key.name !== 'Space') {
+      throw unsupported(`agent-device cannot press ${parsed.key.name} on a device surface; only Enter, Space, and single characters reach the soft keyboard`);
     }
-    if (parsed.key.kind === 'char' || parsed.key.name === 'Space') {
-      const text = parsed.key.kind === 'char' ? parsed.key.char : ' ';
-      if (entry.node.role === 'textbox' && entry.node.states?.focused !== true) {
-        await input.send(() => client.interactions.press({ ...this.actionTarget(entry), ...settle }));
-      }
-      return input.send(() => client.interactions.type({ text }));
+    // A key reaches the field through the soft keyboard, which is up only
+    // while the field holds focus.
+    if (entry.node.role === 'textbox' && entry.node.states?.focused !== true) {
+      await input.send(() => client.interactions.press({ ...this.actionTarget(entry), ...settle }));
     }
-    throw unsupported(`agent-device cannot press ${parsed.key.name} on a device surface; only Enter, Space, and single characters reach the soft keyboard`);
+    if (enter) return input.send(() => client.command.keyboard({ action: 'enter' }));
+    return input.send(() => client.interactions.type({ text: parsed.key.kind === 'char' ? parsed.key.char : ' ' }));
   }
 
   /**
