@@ -41,7 +41,7 @@ import {
   toldAttempt,
 } from './failure-text.ts';
 import { cell, code, formatDuration, link, MAX_ID_CHARS, MAX_PATH_CHARS, MAX_TITLE_CHARS, plural } from './markdown-text.ts';
-import { outcome, type Outcome } from './outcome.ts';
+import { outcome, serialIndex, type Outcome } from './outcome.ts';
 import { isExploreVerdict } from './traces.ts';
 import { toPosixPath, writeTextReport } from './write.ts';
 import type { Reporter, ReporterSummary } from '../types.ts';
@@ -571,13 +571,13 @@ function joinSections(sections: readonly (readonly string[])[]): string[] {
 export function renderMarkdownReport(report: Report1Document, options: MarkdownReportOptions = {}): string {
   const run = report.run;
   const explore = run.explore;
-  const serialGroups = new Map(run.serialGroups.map((group) => [group.id, group]));
+  const serial = serialIndex(run.serialGroups);
   // A result the selection left out (another suite's file, a tag filter) is
   // report-only: the JSON keeps it, and the page counts or lists it only
   // when a test filter left it out, in the headline and the filters section.
   // A document written before results carried the flag is all selected.
   const selected = run.results.filter((result) => result.selected !== false);
-  const entries: Entry[] = selected.map((result) => ({ result, final: outcome(result, serialGroups) }));
+  const entries: Entry[] = selected.map((result) => ({ result, final: outcome(result, serial) }));
   const targets = ranTargets(run, selected);
   const manyTargets = targets.length > 1;
   const leftOut = leftOutTests(run.results);

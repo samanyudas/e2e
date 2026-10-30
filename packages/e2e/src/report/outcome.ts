@@ -10,7 +10,7 @@ import type { SkipInfo } from '../collect/select.ts';
 import type { FailureEvidence } from '../run/records.ts';
 import type { AppLogRecord } from '../run/steps.ts';
 import { isCutSerialRetry } from '../run/retry.ts';
-import type { ReportError, ReportResult, ReportSerialGroup, ReportStep } from './build.ts';
+import type { ReportError, ReportResult, ReportSerialAttempt, ReportSerialGroup, ReportSerialMember, ReportStep } from './build.ts';
 
 type ReportArtifact = ReportResult['attempts'][number]['artifacts'][number];
 
@@ -52,11 +52,33 @@ export interface Outcome {
   readonly failedAttempts: number;
 }
 
+/** A serial group attempt with its members keyed by test id. */
+interface IndexedSerialAttempt {
+  readonly attempt: ReportSerialAttempt;
+  readonly members: ReadonlyMap<string, ReportSerialMember>;
+}
+
+/** Each serial group's attempts, keyed by group id, with their members keyed by test id. */
+export type SerialIndex = ReadonlyMap<string, readonly IndexedSerialAttempt[]>;
+
+/**
+ * Indexes the run's serial groups once, so reading each member's outcome
+ * does not scan its group's members again.
+ */
+export function serialIndex(groups: readonly ReportSerialGroup[]): SerialIndex {
+  return new Map(
+    groups.map((group) => [
+      group.id,
+      group.attempts.map((attempt) => ({ attempt, members: new Map(attempt.members.map((member) => [member.testId, member])) })),
+    ]),
+  );
+}
+
 /** What a result that never ran an attempt reads as. */
 const NO_ATTEMPT: AttemptView = { status: 'skipped', durationMs: 0, cut: false, error: undefined, steps: [], appLog: [], failure: undefined, artifacts: [], secondaryErrors: [], skip: undefined };
 
-export function outcome(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>): Outcome {
-  const views = attemptViews(result, groups);
+export function outcome(result: ReportResult, serial: SerialIndex): Outcome {
+  const views = attemptViews(result, serial);
   const earlier = views.slice(0, -1);
   const final = views.at(-1) ?? NO_ATTEMPT;
   const verdict = views.findLast((view) => !view.cut && reachedVerdict(result.status, view.status)) ?? final;
@@ -71,7 +93,7 @@ export function outcome(result: ReportResult, groups: ReadonlyMap<string, Report
 }
 
 /** The result's attempts as views; a serial member's from its group, keyed by test id. */
-function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>): AttemptView[] {
+function attemptViews(result: ReportResult, serial: SerialIndex): AttemptView[] {
   if (result.serialGroupId === undefined) {
     return result.attempts.map((attempt) => ({
       status: attempt.status,
@@ -87,9 +109,9 @@ function attemptViews(result: ReportResult, groups: ReadonlyMap<string, ReportSe
       skip: attempt.skip,
     }));
   }
-  const attempts = groups.get(result.serialGroupId)?.attempts ?? [];
-  return attempts.map((attempt, index) => {
-    const member = attempt.members.find((candidate) => candidate.testId === result.testId);
+  const attempts = serial.get(result.serialGroupId) ?? [];
+  return attempts.map(({ attempt, members }, index) => {
+    const member = members.get(result.testId);
     return {
       status: member?.status ?? attempt.status,
       durationMs: member?.durationMs ?? 0,

@@ -15,7 +15,7 @@ import { resultId } from '../internal/ids.ts';
 import { packageVersion } from '../internal/package-version.ts';
 import type { RunEvent, RunEventFact, RunEventOf, RunEventResult, SetupStep } from '../run/events.ts';
 import type { AppLogRecord } from '../run/steps.ts';
-import { cleanupErrorsOf, failureBeforeSkip, type ArtifactRecord, type AttemptRecord, type FailureEvidence, type ResultStatus, type SerialGroupRecord } from '../run/records.ts';
+import { cleanupErrorsOf, failureBeforeSkip, type ArtifactRecord, type AttemptRecord, type FailureEvidence, type ResultStatus, type SerialGroupRecord, type SerialMemberRecord } from '../run/records.ts';
 import type { Reporter, ReporterSummary } from '../types.ts';
 import { codeFrame, userFrame } from './code-frame.ts';
 import {
@@ -186,10 +186,11 @@ function videoPaths(attempts: readonly { readonly artifacts: readonly ArtifactRe
  * that attempt never ran (skipped, or absent after a launch failure) inherits
  * the attempt's error, since that is what stopped it.
  */
-function serialMemberDetails(group: SerialGroupRecord, testId: string, configured: ConfiguredModel | undefined): ResultDetails {
-  const runs = group.attempts.map((attempt) => ({
+function serialMemberDetails(pending: PendingSerial, testId: string, configured: ConfiguredModel | undefined): ResultDetails {
+  const { group } = pending;
+  const runs = group.attempts.map((attempt, index) => ({
     attempt,
-    member: attempt.members.find((member) => member.testId === testId),
+    member: pending.members[index]?.get(testId),
   }));
   const last = runs.findLast((run) => run.attempt.status !== 'interrupted') ?? runs.at(-1);
   const own = last?.member;
@@ -209,6 +210,14 @@ function serialMemberDetails(group: SerialGroupRecord, testId: string, configure
     skipReason: neverRan ? undefined : own.skip?.reason,
     replays: replayNotices(steps, configured),
   };
+}
+
+/** A serial group whose members' results are still to come. */
+interface PendingSerial {
+  readonly group: SerialGroupRecord;
+  /** Each attempt's members keyed by test id, in attempt order, so each result reads its member without a scan. */
+  readonly members: readonly ReadonlyMap<string, SerialMemberRecord>[];
+  remaining: number;
 }
 
 /** One failed pair, held for the `Failed Tests` section, or a skipped one for `Skipped After Failure`. */
@@ -275,7 +284,7 @@ export class ListReporter implements Reporter {
    * runner emits a group before its member results, and a member's details
    * live only in the group.
    */
-  private readonly pendingSerial = new Map<string, { group: SerialGroupRecord; remaining: number }>();
+  private readonly pendingSerial = new Map<string, PendingSerial>();
   /** Run-level errors, printed once at the end; the stream carries them as they happen. */
   private readonly errors: SerializedError[] = [];
   /**
@@ -695,7 +704,8 @@ export class ListReporter implements Reporter {
 
   /** Holds a serial group until each of its members' results has read its details. */
   private serialGroup(group: SerialGroupRecord): void {
-    this.pendingSerial.set(group.id, { group, remaining: group.memberTestIds.length });
+    const members = group.attempts.map((attempt) => new Map(attempt.members.map((member) => [member.testId, member])));
+    this.pendingSerial.set(group.id, { group, members, remaining: group.memberTestIds.length });
   }
 
   /**
@@ -710,7 +720,7 @@ export class ListReporter implements Reporter {
     if (pending === undefined) return attemptDetails([], configured);
     pending.remaining -= 1;
     if (pending.remaining <= 0) this.pendingSerial.delete(result.serialGroupId);
-    return serialMemberDetails(pending.group, result.test.id, configured);
+    return serialMemberDetails(pending, result.test.id, configured);
   }
 
   private testFinished(result: RunEventResult): void {

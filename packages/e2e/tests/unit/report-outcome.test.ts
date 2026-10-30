@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ReportResult, ReportSerialAttempt, ReportSerialGroup } from '../../src/report/build.ts';
-import { outcome } from '../../src/report/outcome.ts';
+import { outcome, serialIndex } from '../../src/report/outcome.ts';
 import { REPORT_AT, reportAttempt, reportError, reportResult } from '../helpers/report.ts';
 
 function serialAttempt(index: number, status: 'failed' | 'interrupted', durationMs: number): ReportSerialAttempt {
@@ -27,7 +27,7 @@ function serialOutcome(attempts: ReportSerialGroup['attempts'], status: ReportRe
     status: 'failed',
     attempts,
   };
-  return outcome(reportResult({ status, serialGroupId: group.id, attempts: [] }), new Map([[group.id, group]]));
+  return outcome(reportResult({ status, serialGroupId: group.id, attempts: [] }), serialIndex([group]));
 }
 
 describe('serial verdict attempt', () => {
