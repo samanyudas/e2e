@@ -116,7 +116,8 @@ await expect(screen.getByRole('heading', { name })).toBeVisible();
 
 Use `unique()` for data the flow enters or checks, and ordinary params for
 choices that change the flow, such as a plan name. The substitution also
-covers the value as a URL spells it (`%20`, `+`). When a `unique()` value
+covers the value as a URL spells it (`%20`, `+`) and a multi-line value as
+the screen shows it, on one line. When a `unique()` value
 equals or sits inside another param's value, the step isn't recorded:
 `step.cache.notRecorded` reads `param-collision`, and the next run records
 it.
