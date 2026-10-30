@@ -25,7 +25,10 @@ that support tool calls and the language model specification v2 or later
 (https://ai-sdk.dev/providers). Examples: `@ai-sdk/openai`,
 `@ai-sdk/anthropic`, `@ai-sdk/google`, `@ai-sdk/amazon-bedrock`,
 `@openrouter/ai-sdk-provider`, `ollama-ai-provider-v2`. For a server with
-`/v1/chat/completions`, use `@ai-sdk/openai-compatible`. Vercel AI Gateway
+`/v1/chat/completions`, use `@ai-sdk/openai-compatible`. A TanStack AI
+adapter such as `openaiText()` is not an AI SDK model and fails with
+`INVALID_CONFIG`: use the AI SDK package for the same provider, even when
+the app uses TanStack AI. Vercel AI Gateway
 reads `AI_GATEWAY_API_KEY` or, without it, a Vercel OIDC token:
 
 ```ts
