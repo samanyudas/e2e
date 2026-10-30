@@ -15,7 +15,7 @@ import { displayPath } from '../internal/paths.ts';
 import { resultSegment } from '../run/artifacts.ts';
 import type { Report1Document, ReportExplore, ReportResult } from './build.ts';
 import { renderTracePage } from './failure-text.ts';
-import { outcome, type Outcome } from './outcome.ts';
+import { outcome, serialIndex, type Outcome } from './outcome.ts';
 import { toPosixPath, writeTextReport } from './write.ts';
 
 /** Where each traced result's page went, by result id, as a path from the project root. */
@@ -35,10 +35,10 @@ export function isExploreVerdict(final: Outcome, explore: ReportExplore): boolea
  */
 function tracedResults(report: Report1Document, traced: ReadonlySet<string>): ReportResult[] {
   const explore = report.run.explore;
-  const serialGroups = new Map(report.run.serialGroups.map((group) => [group.id, group]));
+  const serial = serialIndex(report.run.serialGroups);
   return report.run.results.filter((result) => {
     if (!traced.has(result.id)) return false;
-    return explore === undefined || !isExploreVerdict(outcome(result, serialGroups), explore);
+    return explore === undefined || !isExploreVerdict(outcome(result, serial), explore);
   });
 }
 
@@ -61,7 +61,7 @@ const TRACE_PAGE = 'trace.md';
  */
 export async function writeTracePages(report: Report1Document, traced: ReadonlySet<string>, options: WriteTracePagesOptions): Promise<TracePages> {
   const relative = (absolute: string): string => toPosixPath(path.relative(options.projectRoot, absolute)) || '.';
-  const serialGroups = new Map(report.run.serialGroups.map((group) => [group.id, group]));
+  const serial = serialIndex(report.run.serialGroups);
   const readArtifact = (reportPath: string): string | undefined => {
     try {
       return readFileSync(path.join(options.resultsRoot, reportPath), 'utf8');
@@ -73,7 +73,7 @@ export async function writeTracePages(report: Report1Document, traced: ReadonlyS
   for (const result of tracedResults(report, traced)) {
     const dir = resultSegment(result);
     const file = path.join(options.resultsRoot, dir, TRACE_PAGE);
-    const page = renderTracePage(report, result, outcome(result, serialGroups), {
+    const page = renderTracePage(report, result, outcome(result, serial), {
       artifactsDir: relative(options.resultsRoot),
       pageDir: dir,
       readArtifact,

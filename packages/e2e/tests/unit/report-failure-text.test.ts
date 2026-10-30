@@ -9,11 +9,11 @@ import { describe, expect, it } from 'vitest';
 import type { ReportAttempt, ReportResult, ReportStep } from '../../src/report/build.ts';
 import type { ReportSerialGroup } from '../../src/report/build.ts';
 import { attemptsLine, detailLines, evidenceOf, failedStepOf, failureSource, lastTurnLines, renderTracePage, screenLines, toldAttempt } from '../../src/report/failure-text.ts';
-import { outcome } from '../../src/report/outcome.ts';
+import { outcome, serialIndex } from '../../src/report/outcome.ts';
 import { reportAttempt, reportDocument, reportError, reportResult, reportStep, reportTarget } from '../helpers/report.ts';
 
 const UNKNOWN = { file: 'unknown', line: 1, column: 1 };
-const NO_GROUPS = new Map<string, ReportSerialGroup>();
+const NO_GROUPS = serialIndex([]);
 
 function step(overrides: Partial<ReportStep> & Pick<ReportStep, 'index'>): ReportStep {
   return reportStep({ id: `s${overrides.index}`, label: `step ${overrides.index}`, source: UNKNOWN, ...overrides });
@@ -373,7 +373,7 @@ describe('a serial member on its page', () => {
         },
       ],
     } as ReportSerialGroup;
-    const told = toldAttempt(member, outcome(member, new Map([['g1', group]])));
+    const told = toldAttempt(member, outcome(member, serialIndex([group])));
     expect(told.secondaryErrors.map((error) => error.code)).toEqual(['STEP_NOT_AWAITED', 'ENGINE_FAILURE']);
   });
 });

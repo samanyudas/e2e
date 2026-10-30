@@ -1,10 +1,10 @@
 /** JUnit XML reporter: the report-1 document as `.e2e/junit.xml`. */
 
 import { sanitizeText } from '../internal/errors.ts';
-import type { Report1Document, ReportError, ReportResult, ReportSerialGroup } from './build.ts';
+import type { Report1Document, ReportError, ReportResult } from './build.ts';
 import { repeatSuffix } from './format.ts';
 import { toldAttempt } from './failure-text.ts';
-import { outcome } from './outcome.ts';
+import { outcome, serialIndex, type SerialIndex } from './outcome.ts';
 import { fileReporter } from './write.ts';
 
 interface SuiteCounts {
@@ -100,8 +100,8 @@ function skippedMessage(result: ReportResult): string {
   return result.skip?.filter === undefined ? reason : `left out by filter ${result.skip.filter}: ${reason}`;
 }
 
-function renderResult(result: ReportResult, groups: ReadonlyMap<string, ReportSerialGroup>): RenderedCase {
-  const final = outcome(result, groups);
+function renderResult(result: ReportResult, serial: SerialIndex): RenderedCase {
+  const final = outcome(result, serial);
   // The agent joins the name only when it is not `default`, so a suite that
   // never names one keeps the case names its CI history is keyed on.
   const agent = result.agent === 'default' ? '' : ` [${result.agent}]`;
@@ -189,13 +189,13 @@ function renderSuite(name: string, cases: readonly RenderedCase[]): { lines: str
  * the document, never runner state, and it can never change run status.
  */
 export function renderJunitReport(report: Report1Document): string {
-  const groups = new Map(report.run.serialGroups.map((group) => [group.id, group]));
+  const serial = serialIndex(report.run.serialGroups);
   const byFile = new Map<string, RenderedCase[]>();
   for (const result of report.run.results) {
     // Other unselected results are report-only; a CI viewer counts what the run selected.
     if (result.selected === false && result.skip?.filter === undefined) continue;
     const cases = byFile.get(result.file) ?? [];
-    cases.push(renderResult(result, groups));
+    cases.push(renderResult(result, serial));
     byFile.set(result.file, cases);
   }
   const suites = [...byFile].map(([file, cases]) => renderSuite(file, cases));

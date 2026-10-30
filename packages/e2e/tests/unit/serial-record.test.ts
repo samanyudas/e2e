@@ -13,7 +13,7 @@ import type { ResolvedTarget } from '../../src/config/resolve.ts';
 import { createEngineSession } from '../../src/engine/session.ts';
 import { classifyError, serializeError } from '../../src/internal/errors.ts';
 import { buildReport } from '../../src/report/build.ts';
-import { outcome } from '../../src/report/outcome.ts';
+import { outcome, serialIndex } from '../../src/report/outcome.ts';
 import { RealmManager } from '../../src/run/realm.ts';
 import type { AttemptRecord, ResultRecord, SerialAttemptRecord, SerialGroupRecord } from '../../src/run/records.ts';
 import { runSerialUnit, type SerialHost } from '../../src/run/serial.ts';
@@ -157,7 +157,7 @@ describe('serial attempt record provenance', () => {
       const report = buildReport({ runId: host.runId, config: undefined, startedAt: '2026-01-01T00:00:00.000Z', status: 'failed', exitCode: 1, results, serialGroups: groups, runErrors: [], targetProvenance: new Map() });
       const serialized = JSON.parse(JSON.stringify(report));
       expect(serialized.run.serialGroups[0].attempts.map((attempt: { cutRetry: boolean }) => attempt.cutRetry)).toEqual([false, mode !== 'reached']);
-      const result = outcome(report.run.results[0]!, new Map(report.run.serialGroups!.map((group) => [group.id, group])));
+      const result = outcome(report.run.results[0]!, serialIndex(report.run.serialGroups!));
       expect(result.durationMs).toBe(mode === 'reached' ? 0 : 1250);
     } finally {
       await rm(dir, { recursive: true, force: true });
