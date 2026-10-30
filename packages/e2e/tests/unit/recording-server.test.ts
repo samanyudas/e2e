@@ -1,6 +1,6 @@
 import { request as httpRequest } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { json, useServers } from './helpers/server.ts';
+import { json, useServers } from '../helpers/recording-server.ts';
 
 const serve = useServers(afterEach);
 
@@ -16,7 +16,7 @@ function probe(url: string, host: string): Promise<number | undefined> {
   });
 }
 
-describe('the fake issuer server', () => {
+describe('the recording server', () => {
   it('answers a probe for another host 404 and keeps it out of the requests and the handler', async () => {
     const issuer = await serve((_request, response) => json(response, 200, { ok: true }));
     const { port } = new URL(issuer.url);
