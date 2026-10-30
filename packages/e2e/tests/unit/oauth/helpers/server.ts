@@ -13,10 +13,21 @@ export interface Received {
 
 export type Handler = (request: Received, response: ServerResponse) => void | Promise<void>;
 
-/** A local HTTP server that records every request and answers through `handler`. */
+/**
+ * A local HTTP server that records every request sent to its `url` and
+ * answers through `handler`. A request that names another host is answered
+ * 404 and never recorded: tools that watch for new local servers (T3 Code
+ * does) probe each one as `GET /` on `localhost`, which a handler would
+ * otherwise take for the flow's next request.
+ */
 export async function startServer(handler: Handler): Promise<{ url: string; requests: Received[]; close(): Promise<void> }> {
   const requests: Received[] = [];
+  let url = '';
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    if (request.headers.host !== new URL(url).host) {
+      response.writeHead(404).end();
+      return;
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
     const received: Received = {
@@ -36,9 +47,9 @@ export async function startServer(handler: Handler): Promise<{ url: string; requ
     }
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
+  url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return {
-    url: `http://127.0.0.1:${port}`,
+    url,
     requests,
     close: () =>
       new Promise((resolve) => {
