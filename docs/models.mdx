@@ -146,7 +146,9 @@ package and variables are on its [AI SDK provider page](https://ai-sdk.dev/provi
 <ModelProvider show="select" />
 
 A provider that is not in the list also works if it implements the AI SDK
-language model specification v2 or later.
+language model specification v2 or later. Models from other libraries, such
+as TanStack AI adapters, don't. Your app can still use any AI library: the
+model in the config drives only the agent's steps.
 
 <Steps>
   <Step title="Install the provider package">
@@ -281,6 +283,7 @@ them.
 | Problem | Code | Fix |
 | --- | --- | --- |
 | A model is a string instead of an AI SDK instance | `INVALID_CONFIG` | Construct it, for example `gateway('openai/gpt-6-luna-fast')`. |
+| The model is from another library, such as a TanStack AI adapter | `INVALID_CONFIG` | Use the AI SDK package for the same provider, for example `openai()` from `@ai-sdk/openai` for `openaiText()`. |
 | The built-in agent has no model | `MODEL_UNAVAILABLE` | Set `agents.<name>.model`. |
 | GitHub Copilot doesn't serve the model to your account | `MODEL_UNAVAILABLE` | Pick an id your plan serves. See [Pick a model](/subscriptions#pick-a-model). |
 | A provider that reads its key at config load has none | `CONFIG_LOAD_FAILED` | Set the key. |
