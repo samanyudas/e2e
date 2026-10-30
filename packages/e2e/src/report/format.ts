@@ -39,7 +39,7 @@ export function bounded(text: string): string {
  * when no list reporter shows it.
  */
 export function failureLine(error: { readonly code: string; readonly message: string }): string {
-  return `${error.code}: ${bounded(error.message)}\n`;
+  return `${bounded(error.code)}: ${bounded(error.message)}\n`;
 }
 
 /**
