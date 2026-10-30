@@ -167,11 +167,12 @@ const connection = new AgentSideConnection(
             });
           }
           if (move.thenRan !== undefined) {
+            // Logged first: the executor stops this agent as soon as it reports the tool.
+            log({ ran: move.thenRan });
             await client.sessionUpdate({
               sessionId: 's1',
               update: { sessionUpdate: 'tool_call', toolCallId: `ran-${turn}-${move.thenRan}`, title: move.thenRan, kind: 'read', status: 'in_progress' },
             });
-            log({ ran: move.thenRan });
           }
           return { stopReason: 'cancelled' };
         } else {
