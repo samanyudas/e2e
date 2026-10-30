@@ -43,6 +43,7 @@ import { buildReport, projectSource, type Report1Document, type ReportChanges, t
 import { agentStepTable } from '../report/debug-steps.ts';
 import { writeTracePages, type TracePages } from '../report/traces.ts';
 import { STATELESS_REPORTERS } from '../report/builtin.ts';
+import { failureLine } from '../report/format.ts';
 import { ListReporter } from '../report/list.ts';
 import { writeJsonReport } from '../report/write.ts';
 import { createRunEventEmitter, toEventResult, type RunEventSink, type RunExitCode, type RunStatus, type RunEventFact, type SetupOutcome, type SetupStep } from './events.ts';
@@ -726,6 +727,11 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     // The list reporter has printed its summary and stopped its window; a
     // line another reporter left unfinished on `run-finished` prints too.
     processOutput?.showThrough(undefined);
+    // Only the list reporter prints run errors, and a run that stopped before
+    // its tests writes no file to read them in, so without it they go to stderr.
+    if (listReporter === undefined && options.quiet !== true) {
+      for (const error of report.run.errors) process.stderr.write(failureLine(error));
+    }
     if (debug.enabled) {
       process.stderr.write(debug.summary());
       process.stderr.write(agentStepTable(results, serialGroups));

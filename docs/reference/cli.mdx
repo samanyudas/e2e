@@ -690,6 +690,9 @@ an interrupt. Its errors are on the terminal and in the exit code. A
 `junit.xml` or `summary.md` that could not be written is a line on stderr,
 never a run error.
 
+The `list` reporter prints run errors under `Run Errors`. Without `list`,
+each run error prints on stderr as `CODE: message`, with `json` too.
+
 `run.summary` in the report counts the results:
 
 - `discovered` is every test-target pair the runner collected, and
