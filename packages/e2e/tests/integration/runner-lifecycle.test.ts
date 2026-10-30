@@ -500,7 +500,9 @@ test.describe('wizard', { serial: true, retries: 1 }, () => {
   });
 });
 `;
+      process.env['SERIAL_ATTEMPT'] = '0';
       const { outcome, project } = await runProject({ 'tests/serialretry.e2e.ts': file }, {});
+      delete process.env['SERIAL_ATTEMPT'];
       const members = outcome.report.run.serialGroups[0]!.attempts.map((entry) => entry.members.map((member) => member.status));
       expect(members).toEqual([
         ['passed', 'failed'],
